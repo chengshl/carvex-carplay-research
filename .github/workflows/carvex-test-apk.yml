@@ -1,0 +1,109 @@
+name: CarVeX APK exploratory build
+
+on:
+  push:
+    branches:
+      - test/apk-build-20261102
+    paths:
+      - '.github/workflows/carvex-test-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: carvex-test-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Xiaomi release APK and protocol tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      CARVEX_ANDROID_SHA: 69802bfd5c0e4f32ae07d85fda9a36dae0d9e670
+    steps:
+      - name: Checkout exact upstream Android source
+        uses: actions/checkout@v4
+        with:
+          repository: iamr0s/carvex-android
+          ref: 69802bfd5c0e4f32ae07d85fda9a36dae0d9e670
+          path: android
+          fetch-depth: 0
+
+      - name: Verify source identity
+        working-directory: android
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CARVEX_ANDROID_SHA"
+          git log -1 --format='%H %cI %s'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Install Android SDK build requirements
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
+
+      - name: Check source signing material
+        working-directory: android
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s .signing/release.jks
+          test -s .signing/keystore.properties
+          chmod +x gradlew
+
+      - name: Test protocol and assemble Xiaomi release
+        working-directory: android
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../dist
+          ./gradlew :protocol-carplay:testDebugUnitTest :app:testXiaomiDebugUnitTest :app:lintXiaomiRelease :app:assembleXiaomiRelease --build-cache --parallel --configuration-cache --stacktrace --console=plain 2>&1 | tee ../dist/gradle-build.log
+
+      - name: Verify and collect test APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          apks=(android/app/build/outputs/apk/xiaomi/release/*.apk)
+          test "${#apks[@]}" -eq 1
+          apk="${apks[0]}"
+          cp "$apk" dist/
+          filename="$(basename "$apk")"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "dist/$filename" > dist/apk-signing.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "dist/$filename" | head -n 15 > dist/apk-badging.txt
+          (cd dist && sha256sum "$filename" > SHA256SUMS)
+          printf 'Android upstream source: %s\nResearch fork branch: %s\nRun: https://github.com/%s/actions/runs/%s\n' "$CARVEX_ANDROID_SHA" "$GITHUB_REF_NAME" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" > dist/source-info.txt
+          {
+            echo "## CarVeX test APK"
+            echo "Source: \`$CARVEX_ANDROID_SHA\`"
+            echo "APK: \`$filename\`"
+            echo "Protocol tests, Xiaomi unit tests, Xiaomi lint and signed release assembly passed."
+            echo "Car audio/microphone transfer is not implemented; vehicle compatibility unverified."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload APK, provenance and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: carvex-xiaomi-experimental-apk
+          path: |
+            dist/**
+            android/**/build/reports/**
+            android/**/build/test-results/**
+          if-no-files-found: warn
+          retention-days: 30
