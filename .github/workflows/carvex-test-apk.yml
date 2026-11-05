@@ -21,13 +21,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 50
     env:
-      CARVEX_ANDROID_SHA: 69802bfd5c0e4f32ae07d85fda9a36dae0d9e670
+      CARVEX_ANDROID_SHA: aa7b75000dcb1e09ec92e27cd24dd8f9ddb24ba6
     steps:
       - name: Checkout exact upstream Android source
         uses: actions/checkout@v4
         with:
           repository: iamr0s/carvex-android
-          ref: 69802bfd5c0e4f32ae07d85fda9a36dae0d9e670
+          ref: aa7b75000dcb1e09ec92e27cd24dd8f9ddb24ba6
           path: android
           fetch-depth: 0
 
